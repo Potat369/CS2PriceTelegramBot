@@ -20,6 +20,8 @@
           ]
           ++ (with pkgs.python313Packages; [
             python-dotenv
+            beautifulsoup4
+            requests
           ]);
       };
     };
