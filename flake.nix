@@ -15,6 +15,8 @@
           with pkgs;
           [
             python313
+            black
+            isort
           ]
           ++ (with pkgs.python313Packages; [ ]);
       };
