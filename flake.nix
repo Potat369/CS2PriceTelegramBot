@@ -18,7 +18,9 @@
             black
             isort
           ]
-          ++ (with pkgs.python313Packages; [ ]);
+          ++ (with pkgs.python313Packages; [
+            python-dotenv
+          ]);
       };
     };
 }
