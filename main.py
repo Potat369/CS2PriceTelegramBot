@@ -175,11 +175,11 @@ def update_skins():
                     skin_title = skin_container.find(
                         "span", class_="block text-lg leading-6 truncate mt-3"
                     )
-                    skin_picture = skin_container.find("img")
-                    skins_to_add.append((skin_title, skin_picture))
+                    skin_image = skin_container.find("img")
+                    skins_to_add.append((skin_title, skin_image))
 
             db.executemany(
-                f"INSERT INTO {to_db_name(weapon)}(skin_name, picture_url) VALUES(?, ?) ON CONFLICT(skin_name) DO NOTHING;",
+                f"INSERT INTO {to_db_name(weapon)}(skin_name, image_url) VALUES(?, ?) ON CONFLICT(skin_name) DO NOTHING;",
                 skins_to_add,
             )
             pages_to_parse = []
