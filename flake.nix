@@ -23,7 +23,6 @@
             beautifulsoup4
             requests
             aiogram
-            fake-useragent
             appdirs
           ]);
       };

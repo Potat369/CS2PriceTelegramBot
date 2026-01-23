@@ -2,9 +2,9 @@ import asyncio
 import itertools
 import logging
 import os
+import re
 import sqlite3
 import sys
-import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
@@ -30,7 +30,6 @@ from aiogram.utils.keyboard import (
     ReplyKeyboardBuilder,
 )
 from bs4 import BeautifulSoup
-from fake_useragent import UserAgent
 
 
 class ChatState(StatesGroup):
@@ -38,14 +37,14 @@ class ChatState(StatesGroup):
     skin = State()
 
 
-db = sqlite3.connect(
-    "db.sqlite3",
-)
+db = sqlite3.connect("db.sqlite3")
 logger = logging.getLogger(__name__)
 dp = Dispatcher()
+datetime_format = "%d-%b-%Y (%H:%M:%S.%f)"
 
 headers = {
-    "User-Agent": UserAgent().random,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91"
 }
 
 weapon_categories = {
@@ -80,8 +79,21 @@ weapon_categories = {
         "Specialist Gloves",
         "Sport Gloves",
     ],
-    "Assault Rifles": ["AK-47", "M4A1-S", "M4A4", "AUG", "FAMAS", "Galil AR", "SG 553"],
-    "Sniper Rifles": ["AWP", "G3SG1", "SCAR-20", "SSG 08"],
+    "Assault Rifles": [
+        "AK-47",
+        "M4A1-S",
+        "M4A4",
+        "AUG",
+        "FAMAS",
+        "Galil AR",
+        "SG 553",
+    ],
+    "Sniper Rifles": [
+        "AWP",
+        "G3SG1",
+        "SCAR-20",
+        "SSG 08",
+    ],
     "Pistols": [
         "CZ75-Auto",
         "Desert Eagle",
@@ -95,9 +107,24 @@ weapon_categories = {
         "USP-S",
         "Zeus x27",
     ],
-    "SMGs": ["MAC-10", "MP5-SD", "MP7", "MP9", "PP-Bizon", "UMP-45"],
-    "Shotguns": ["MAG-7", "Nova", "Sawed-Off", "XM1014"],
-    "Machine Guns": ["M249", "Negev"],
+    "SMGs": [
+        "MAC-10",
+        "MP5-SD",
+        "MP7",
+        "MP9",
+        "PP-Bizon",
+        "UMP-45",
+    ],
+    "Shotguns": [
+        "MAG-7",
+        "Nova",
+        "Sawed-Off",
+        "XM1014",
+    ],
+    "Machine Guns": [
+        "M249",
+        "Negev",
+    ],
 }
 
 weapons = list(itertools.chain.from_iterable(weapon_categories.values()))
@@ -137,16 +164,12 @@ def to_db_name(string: str) -> str:
 
 
 def to_url(string: str) -> str:
-    return (
-        string.lower()
-        .replace(" ", "-")
-        .translate(str.maketrans("", "", string.punctuation))
-    )
+    return "".join(re.findall("[a-z|0-9|-]+", string.lower().replace(" ", "-")))
 
 
 async def run_after(seconds, function, *args):
     await asyncio.sleep(seconds)
-    await function(args)
+    await function(*args)
 
 
 async def update_skins(last_update_file: Path):
@@ -198,32 +221,43 @@ async def update_skins(last_update_file: Path):
                     skin_title = skin_container.find(
                         "span", class_="block text-lg leading-6 truncate mt-3"
                     )
+                    skin_prices = skin_container.find(
+                        "left-4 right-4 text-center text-lg absolute whitespace-nowrap top-[395px]"
+                    ).find_all("a")
                     skin_image = skin_container.find("img")
-                    skins_to_add.append((skin_title.text, skin_image["src"]))
+                    skins_to_add.append(
+                        (
+                            skin_title.text,
+                            skin_image["src"],
+                            skin_prices[0].strip()[1:],
+                            skin_prices[1].strip()[1:],
+                        )
+                    )
 
             db.executemany(
-                f"INSERT INTO {to_db_name(weapon)}(skin_name, image_url) VALUES(?, ?) ON CONFLICT(skin_name) DO NOTHING;",
+                f"INSERT INTO {to_db_name(weapon)}(skin_name, image_url, min_price, max_price) VALUES(?, ?, ?, ?) ON CONFLICT(skin_name) DO UPDATE SET min_price = excluded.min_price, max_price = excluded.max_price;",
                 skins_to_add,
             )
             db.commit()
             pages_to_parse = []
             skins_to_add = []
-    last_update_file.write_text(datetime.now().strftime("%d-%b-%Y (%H:%M:%S.%f)"))
+    last_update_file.write_text(datetime.now().strftime(datetime_format))
     logger.info("Finished updating skins")
-    asyncio.create_task(run_after(43200, update_skins, last_update_file))
+    asyncio.create_task(run_after(300, update_skins, last_update_file))
 
 
 async def schedule_skins_update():
     data_dir = Path(appdirs.user_data_dir("CS2PriceBot", os.getlogin()))
     if not data_dir.exists():
         os.makedirs(data_dir)
+        data_dir.mkdir(parents=True)
 
     last_update_file = data_dir / "last_update"
     if last_update_file.is_file():
-        time = datetime.strptime(last_update_file.read_text(), "%d-%b-%Y (%H:%M:%S.%f)")
+        time = datetime.strptime(last_update_file.read_text(), datetime_format)
         time_diff = datetime.now() - time
-        if time_diff < timedelta(hours=12):
-            time_before_next_run = (timedelta(hours=12) - time_diff).total_seconds()
+        if time_diff < timedelta(minutes=5):
+            time_before_next_run = (timedelta(hours=5) - time_diff).total_seconds()
             asyncio.create_task(
                 run_after(time_before_next_run, update_skins, last_update_file)
             )
@@ -292,10 +326,10 @@ async def skin_handler(message, state):
     if data == None:
         await message.answer(text="Unknown skin")
     else:
-        name, image_url, last_update, *prices = data
+        name, image_url, min_price, max_price = data
         await message.answer_photo(
             photo=image_url,
-            caption=f"🎯 {weapon} | {skin}\n💰 Current prices for this item: {0} -- {1}.\n",
+            caption=f"🎯 {item_name} | {item_skin}\n💰 Current prices for this item: {min_price} -- {max_price}.",
         )
 
 
@@ -318,9 +352,6 @@ async def unknown_category_handler(message):
 
 
 async def main():
-    # Warnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
-
     # Logger
     stdout_handler = logging.StreamHandler(stream=sys.stdout)
     fmt = logging.Formatter(
@@ -347,12 +378,8 @@ async def main():
                 CREATE TABLE IF NOT EXISTS {to_db_name(weapon)} (
                     skin_name STRING PRIMARY KEY,
                     image_url STRING,
-                    last_update TIMESTAMP,
-                    factory_new_price REAL,
-                    minimal_wear_price REAL,
-                    field_tested_price REAL,
-                    well_worn_price REAL,
-                    battle_scarred_price REAL
+                    min_price DECIMAL(11, 2),
+                    max_price DECIMAL(11, 2)
                 )
                 """
             )
@@ -360,6 +387,8 @@ async def main():
 
     # Schedule update
     await schedule_skins_update()
+
+    # Bot
     logger.info("Starting bot")
     bot = Bot(token=TOKEN)
     await dp.start_polling(bot)
