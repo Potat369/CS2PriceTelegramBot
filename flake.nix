@@ -24,6 +24,7 @@
             requests
             aiogram
             fake-useragent
+            appdirs
           ]);
       };
     };
