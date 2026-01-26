@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import appdirs
 import dotenv
@@ -43,8 +43,7 @@ dp = Dispatcher()
 datetime_format = "%d-%b-%Y (%H:%M:%S.%f)"
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
 weapon_categories = {
@@ -167,6 +166,12 @@ def to_url(string: str) -> str:
     return "".join(re.findall("[a-z|0-9|-]+", string.lower().replace(" ", "-")))
 
 
+def price_to_float(price: Union[str, None]) -> Union[float, None]:
+    if price is not None:
+        return None
+    return price.strip().replace(",", "")[1:]
+
+
 async def run_after(seconds, function, *args):
     await asyncio.sleep(seconds)
     await function(*args)
@@ -180,7 +185,7 @@ async def update_skins(last_update_file: Path):
         for weapon in weapon_categories[category]:
             url = f"https://csgoskins.gg/weapons/{to_url(weapon)}"
 
-            main_page_res = requests.get(url, headers=headers)
+            main_page_res = requests.get(url, headers=headers, stream=True)
             await asyncio.sleep(0.5)
             logger.debug(f"{main_page_res.status_code} {url}")
 
@@ -191,48 +196,50 @@ async def update_skins(last_update_file: Path):
             pages_to_parse.append(main_page)
             main_page_soup = BeautifulSoup(main_page, "html.parser")
 
-            pages_element = main_page_soup.find("div", class_="w-full mt-8 p-4")
-            if pages_element != None:
-                numbers_container = pages_element.find(
-                    "div", class_="text-sm text-gray-400"
+            pages_container = main_page_soup.select_one("div.w-full.mt-8.p-4")
+            if pages_container != None:
+                pages = pages_container.select_one(
+                    "div.text-sm.text-gray-400 > span:nth-child(2)"
                 )
-                number_spans = numbers_container.find_all("span")
-                for number_span in number_spans:
-                    number = number_span.text
-                    if number == "1":
-                        continue
+                for number in range(2, int(pages.text) + 1):
                     page_url = f"{url}?page={number}"
-                    page_res = requests.get(page_url, headers=headers)
+                    page_res = requests.get(page_url, headers=headers, stream=True)
 
                     await asyncio.sleep(0.5)
 
                     logger.debug(f"{page_res.status_code} {page_url}")
 
                     if page_res.status_code is requests.codes.ok:
-                        pages_to_parse.append(page_res.text)
+                        pages_to_parse.append(page_res.raw.data())
 
             for page in pages_to_parse:
                 page_soup = BeautifulSoup(page, "html.parser")
-                skin_containers = page_soup.find_all(
-                    "div",
-                    class_="w-full sm:w-1/2 md:w-1/2 lg:w-1/3 xl:w-1/3 2xl:w-1/4 p-4 flex-none",
-                )
+
+                skin_containers = page_soup.select("div.flex-none.w-full")
                 for skin_container in skin_containers:
-                    skin_title = skin_container.find(
-                        "span", class_="block text-lg leading-6 truncate mt-3"
-                    )
-                    skin_prices = skin_container.find(
-                        "left-4 right-4 text-center text-lg absolute whitespace-nowrap top-[395px]"
-                    ).find_all("a")
-                    skin_image = skin_container.find("img")
-                    skins_to_add.append(
-                        (
-                            skin_title.text,
-                            skin_image["src"],
-                            skin_prices[0].strip()[1:],
-                            skin_prices[1].strip()[1:],
+                    skin_title = skin_container.select_one("span.block.text-lg").text
+                    skin_image = skin_container.select_one("img")["src"]
+                    skin_prices = skin_container.select("div.top-\\[395px\\] > a")
+                    if len(skin_prices) == 0:
+                        skins_to_add.append((skin_title, skin_image, None, None))
+                    elif len(skin_prices) == 1:
+                        skins_to_add.append(
+                            (
+                                skin_title,
+                                skin_image,
+                                price_to_float(skin_prices[0]),
+                                None,
+                            )
                         )
-                    )
+                    else:
+                        skins_to_add.append(
+                            (
+                                skin_title,
+                                skin_image,
+                                price_to_float(skin_prices[0]),
+                                price_to_float(skin_prices[0]),
+                            )
+                        )
 
             db.executemany(
                 f"INSERT INTO {to_db_name(weapon)}(skin_name, image_url, min_price, max_price) VALUES(?, ?, ?, ?) ON CONFLICT(skin_name) DO UPDATE SET min_price = excluded.min_price, max_price = excluded.max_price;",
@@ -249,7 +256,6 @@ async def update_skins(last_update_file: Path):
 async def schedule_skins_update():
     data_dir = Path(appdirs.user_data_dir("CS2PriceBot", os.getlogin()))
     if not data_dir.exists():
-        os.makedirs(data_dir)
         data_dir.mkdir(parents=True)
 
     last_update_file = data_dir / "last_update"
@@ -326,10 +332,10 @@ async def skin_handler(message, state):
     if data == None:
         await message.answer(text="Unknown skin")
     else:
-        name, image_url, min_price, max_price = data
+        item_name, image_url, min_price, max_price = data
         await message.answer_photo(
             photo=image_url,
-            caption=f"🎯 {item_name} | {item_skin}\n💰 Current prices for this item: {min_price} -- {max_price}.",
+            caption=f"🎯 {item_name} | {skin}\n💰 Current prices for this item: ${f"{min_price} -- ${max_price}" if max_price else min_price}.",
         )
 
 
@@ -378,8 +384,8 @@ async def main():
                 CREATE TABLE IF NOT EXISTS {to_db_name(weapon)} (
                     skin_name STRING PRIMARY KEY,
                     image_url STRING,
-                    min_price DECIMAL(11, 2),
-                    max_price DECIMAL(11, 2)
+                    min_price REAL,
+                    max_price REAL
                 )
                 """
             )
