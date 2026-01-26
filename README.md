@@ -10,10 +10,11 @@ pip install -r requirements.txt
 
 ## Running
 
-Go to `@BotFather`, create a bot, and copy its token.
-Copy `.env.example`, rename it in `.env`, and paste token into TOKEN variable.
-Run:
+Go to `@BotFather`, create a bot.
 
+Copy `.env.example`, rename it into `.env`, paste token into TOKEN variable.
+
+Run:
 ```bash
 python main.py 
 ```
