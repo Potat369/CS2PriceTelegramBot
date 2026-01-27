@@ -1,0 +1,22 @@
+[2026-01-27 11:02:11] [main.py:424/INFO]: Starting bot
+[2026-01-27 11:02:11] [main.py:183/INFO]: Started updating skins
+[2026-01-27 11:02:12] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bayonet
+[2026-01-27 11:02:12] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bowie-knife
+[2026-01-27 11:02:13] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/butterfly-knife
+[2026-01-27 11:02:14] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/classic-knife
+[2026-01-27 11:02:14] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/falchion-knife
+[2026-01-27 11:07:46] [main.py:432/INFO]: Starting bot
+[2026-01-27 11:07:46] [main.py:183/INFO]: Started updating skins
+[2026-01-27 11:07:46] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bayonet
+[2026-01-27 11:08:02] [main.py:432/INFO]: Starting bot
+[2026-01-27 11:08:02] [main.py:183/INFO]: Started updating skins
+[2026-01-27 11:08:02] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bayonet
+[2026-01-27 11:08:02] [main.py:195/ERROR]: Failed to parse: 403(None)
+[2026-01-27 11:33:33] [main.py:432/INFO]: Starting bot
+[2026-01-27 11:33:33] [main.py:183/INFO]: Started updating skins
+[2026-01-27 11:33:34] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bayonet
+[2026-01-27 11:33:34] [main.py:195/ERROR]: Failed to parse: 403(None)
+[2026-01-27 11:33:42] [main.py:428/INFO]: Starting bot
+[2026-01-27 11:33:42] [main.py:183/INFO]: Started updating skins
+[2026-01-27 11:33:42] [main.py:192/DEBUG]: 403 https://csgoskins.gg/weapons/bayonet
+[2026-01-27 11:33:42] [main.py:195/ERROR]: Failed to parse: 403

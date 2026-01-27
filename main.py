@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional
 
 import appdirs
 import dotenv
@@ -37,13 +37,15 @@ class ChatState(StatesGroup):
     skin = State()
 
 
+SECONDS_BETWEEN_SCRAPES = 600
 db = sqlite3.connect("db.sqlite3")
 logger = logging.getLogger(__name__)
 dp = Dispatcher()
 datetime_format = "%d-%b-%Y (%H:%M:%S.%f)"
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "accept-encoding": "gzip, deflate",
 }
 
 weapon_categories = {
@@ -166,8 +168,8 @@ def to_url(string: str) -> str:
     return "".join(re.findall("[a-z|0-9|-]+", string.lower().replace(" ", "-")))
 
 
-def price_to_float(price: Union[str, None]) -> Union[float, None]:
-    if price is not None:
+def price_to_float(price: Optional[str]) -> Optional[float]:
+    if price == None:
         return None
     return price.strip().replace(",", "")[1:]
 
@@ -190,7 +192,8 @@ async def update_skins(last_update_file: Path):
             logger.debug(f"{main_page_res.status_code} {url}")
 
             if main_page_res.status_code is not requests.codes.ok:
-                continue
+                logger.error(f"Failed to parse: {main_page_res.status_code}")
+                return
 
             main_page = main_page_res.text
             pages_to_parse.append(main_page)
@@ -210,7 +213,10 @@ async def update_skins(last_update_file: Path):
                     logger.debug(f"{page_res.status_code} {page_url}")
 
                     if page_res.status_code is requests.codes.ok:
-                        pages_to_parse.append(page_res.raw.data())
+                        pages_to_parse.append(page_res.text)
+                    else:
+                        logger.error(f"Failed to parse: {page_res.status_code}")
+                        return
 
             for page in pages_to_parse:
                 page_soup = BeautifulSoup(page, "html.parser")
@@ -220,26 +226,18 @@ async def update_skins(last_update_file: Path):
                     skin_title = skin_container.select_one("span.block.text-lg").text
                     skin_image = skin_container.select_one("img")["src"]
                     skin_prices = skin_container.select("div.top-\\[395px\\] > a")
-                    if len(skin_prices) == 0:
-                        skins_to_add.append((skin_title, skin_image, None, None))
-                    elif len(skin_prices) == 1:
-                        skins_to_add.append(
-                            (
-                                skin_title,
-                                skin_image,
-                                price_to_float(skin_prices[0]),
-                                None,
-                            )
+                    skins_to_add.append(
+                        (
+                            skin_title,
+                            skin_image,
+                            price_to_float(
+                                skin_prices[0].text if len(skin_prices) >= 1 else None
+                            ),
+                            price_to_float(
+                                skin_prices[1].text if len(skin_prices) >= 2 else None
+                            ),
                         )
-                    else:
-                        skins_to_add.append(
-                            (
-                                skin_title,
-                                skin_image,
-                                price_to_float(skin_prices[0]),
-                                price_to_float(skin_prices[0]),
-                            )
-                        )
+                    )
 
             db.executemany(
                 f"INSERT INTO {to_db_name(weapon)}(skin_name, image_url, min_price, max_price) VALUES(?, ?, ?, ?) ON CONFLICT(skin_name) DO UPDATE SET min_price = excluded.min_price, max_price = excluded.max_price;",
@@ -250,20 +248,28 @@ async def update_skins(last_update_file: Path):
             skins_to_add = []
     last_update_file.write_text(datetime.now().strftime(datetime_format))
     logger.info("Finished updating skins")
-    asyncio.create_task(run_after(300, update_skins, last_update_file))
+    asyncio.create_task(
+        run_after(SECONDS_BETWEEN_SCRAPES, update_skins, last_update_file)
+    )
 
 
 async def schedule_skins_update():
+    """Schedules update for skins
+
+    If last_update file is not found assuming first-run and waiting until all skins are parsed
+    """
+
     data_dir = Path(appdirs.user_data_dir("CS2PriceBot", os.getlogin()))
-    if not data_dir.exists():
-        data_dir.mkdir(parents=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     last_update_file = data_dir / "last_update"
     if last_update_file.is_file():
         time = datetime.strptime(last_update_file.read_text(), datetime_format)
         time_diff = datetime.now() - time
-        if time_diff < timedelta(minutes=5):
-            time_before_next_run = (timedelta(hours=5) - time_diff).total_seconds()
+        if time_diff < timedelta(seconds=SECONDS_BETWEEN_SCRAPES):
+            time_before_next_run = (
+                timedelta(seconds=SECONDS_BETWEEN_SCRAPES) - time_diff
+            ).total_seconds()
             asyncio.create_task(
                 run_after(time_before_next_run, update_skins, last_update_file)
             )
@@ -333,10 +339,21 @@ async def skin_handler(message, state):
         await message.answer(text="Unknown skin")
     else:
         item_name, image_url, min_price, max_price = data
-        await message.answer_photo(
-            photo=image_url,
-            caption=f"🎯 {item_name} | {skin}\n💰 Current prices for this item: ${f"{min_price} -- ${max_price}" if max_price else min_price}.",
-        )
+        if min_price != None and max_price != None:
+            await message.answer_photo(
+                photo=image_url,
+                caption=f"🎯 {weapon} | {skin}\n💰 Current prices for this item: ${min_price:.2f} -- ${max_price:.2f}",
+            )
+        elif min_price != None:
+            await message.answer_photo(
+                photo=image_url,
+                caption=f"🎯 {weapon} | {skin}\n💰 Current price for this item: ${min_price:.2f}",
+            )
+        else:
+            await message.answer_photo(
+                photo=image_url,
+                caption=f"🎯 {weapon} | {skin}\n💰 No price data",
+            )
 
 
 @dp.message(F.text.in_(weapon_categories.keys()))
@@ -359,14 +376,27 @@ async def unknown_category_handler(message):
 
 async def main():
     # Logger
+    logger.setLevel(logging.DEBUG)
+
+    log_dir = Path(appdirs.user_log_dir("CS2PriceBot", os.getlogin()))
+    log_dir.mkdir(parents=True, exist_ok=True)
+
     stdout_handler = logging.StreamHandler(stream=sys.stdout)
+    file_handler = logging.FileHandler("latest.log")
+
     fmt = logging.Formatter(
-        "[%(asctime)s] [%(filename)s:%(lineno)s/%(levelname)s]: %(message)s"
+        "[%(asctime)s] [%(filename)s:%(lineno)s/%(levelname)s]: %(message)s",
+        "%Y-%m-%d %H:%M:%S",
     )
 
+    stdout_handler.setLevel(logging.INFO)
+    file_handler.setLevel(logging.DEBUG)
+
     stdout_handler.setFormatter(fmt)
+    file_handler.setFormatter(fmt)
+
     logger.addHandler(stdout_handler)
-    logger.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
 
     # Env
     dotenv.load_dotenv()
