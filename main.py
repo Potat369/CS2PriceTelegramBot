@@ -18,16 +18,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.types import (
+    InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
-)
-from aiogram.utils.keyboard import (
-    InlineKeyboardBuilder,
-    KeyboardBuilder,
-    ReplyKeyboardBuilder,
 )
 from bs4 import BeautifulSoup
 
@@ -41,7 +37,7 @@ SECONDS_BETWEEN_SCRAPES = 600
 db = sqlite3.connect("db.sqlite3")
 logger = logging.getLogger(__name__)
 dp = Dispatcher()
-datetime_format = "%d-%b-%Y (%H:%M:%S.%f)"
+datetime_format = "%Y-%m-%d %H:%M:%S"
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -187,7 +183,7 @@ async def update_skins(last_update_file: Path):
         for weapon in weapon_categories[category]:
             url = f"https://csgoskins.gg/weapons/{to_url(weapon)}"
 
-            main_page_res = requests.get(url, headers=headers, stream=True)
+            main_page_res = requests.get(url, headers=headers)
             await asyncio.sleep(0.5)
             logger.debug(f"{main_page_res.status_code} {url}")
 
@@ -206,7 +202,7 @@ async def update_skins(last_update_file: Path):
                 )
                 for number in range(2, int(pages.text) + 1):
                     page_url = f"{url}?page={number}"
-                    page_res = requests.get(page_url, headers=headers, stream=True)
+                    page_res = requests.get(page_url, headers=headers)
 
                     await asyncio.sleep(0.5)
 
@@ -339,21 +335,29 @@ async def skin_handler(message, state):
         await message.answer(text="Unknown skin")
     else:
         item_name, image_url, min_price, max_price = data
+
+        caption: str
         if min_price != None and max_price != None:
-            await message.answer_photo(
-                photo=image_url,
-                caption=f"🎯 {weapon} | {skin}\n💰 Current prices for this item: ${min_price:.2f} -- ${max_price:.2f}",
-            )
+            caption = f"🎯 {weapon} | {skin}\n💰 Current prices for this item: ${min_price:.2f} -- ${max_price:.2f}"
         elif min_price != None:
-            await message.answer_photo(
-                photo=image_url,
-                caption=f"🎯 {weapon} | {skin}\n💰 Current price for this item: ${min_price:.2f}",
-            )
+            caption = f"🎯 {weapon} | {skin}\n💰 Current price for this item: ${min_price:.2f}"
         else:
-            await message.answer_photo(
-                photo=image_url,
-                caption=f"🎯 {weapon} | {skin}\n💰 No price data",
-            )
+            caption = f"🎯 {weapon} | {skin}\n💰 No price data"
+
+        await message.answer_photo(
+            photo=image_url,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="All current prices",
+                            url=f"https://csgoskins.gg/items/{to_url(weapon)}-{to_url(skin)}",
+                        )
+                    ]
+                ]
+            ),
+        )
 
 
 @dp.message(F.text.in_(weapon_categories.keys()))
@@ -380,13 +384,14 @@ async def main():
 
     log_dir = Path(appdirs.user_log_dir("CS2PriceBot", os.getlogin()))
     log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "latest.log"
 
     stdout_handler = logging.StreamHandler(stream=sys.stdout)
-    file_handler = logging.FileHandler("latest.log")
+    file_handler = logging.FileHandler(log_file.resolve())
 
     fmt = logging.Formatter(
         "[%(asctime)s] [%(filename)s:%(lineno)s/%(levelname)s]: %(message)s",
-        "%Y-%m-%d %H:%M:%S",
+        datetime_format,
     )
 
     stdout_handler.setLevel(logging.INFO)

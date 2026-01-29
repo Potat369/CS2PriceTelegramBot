@@ -24,6 +24,7 @@
             requests
             aiogram
             appdirs
+            cloudscraper
           ]);
       };
     };
